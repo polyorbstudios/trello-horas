@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard de horas</title>
+<script src="https://p.trellocdn.com/power-up.min.js"></script>
+<script src="./config.js"></script>
+<script src="./util.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --sother: #898781;
+    --h1: #cde2fb; --h2: #9ec5f4; --h3: #6da7ec; --h4: #2a78d6; --h5: #184f95;
+    --danger: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 14px; margin: 0 0 10px; color: var(--ink); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  select, input[type=date], button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  .spacer { flex: 1; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .kpi .v { font-size: 26px; font-weight: 600; }
+  .kpi .l { color: var(--ink2); font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink2); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  .who { display: inline-flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+  .barcell { width: 26%; }
+  .bar { height: 8px; border-radius: 4px; background: var(--h4); min-width: 2px; }
+  .barrow { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button { border-color: transparent; background: transparent; color: var(--ink2); }
+  .tabs button.on { background: var(--h1); color: #0b0b0b; font-weight: 600; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; color: var(--ink2); font-size: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .scroll { overflow-x: auto; }
+  .heat td.c { text-align: center; min-width: 54px; border-bottom: 2px solid var(--surface); border-right: 2px solid var(--surface); }
+  .muted { color: var(--muted); }
+  .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--axis); border-radius: 6px; padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.18); display: none; max-width: 260px; }
+  .tip b { display: block; margin-bottom: 2px; }
+  .tip div { display: flex; justify-content: space-between; gap: 14px; }
+  .center { text-align: center; padding: 40px 10px; color: var(--ink2); }
+  .err { color: var(--danger); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+  .chip { background: var(--grid); border-radius: 10px; padding: 1px 8px; font-size: 12px; color: var(--ink2); }
+  a { color: var(--s1); text-decoration: none; }
+  svg text { fill: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="root"><div class="center">Carregando…</div></div>
+<div class="tip" id="tip"></div>
+
+<script>
+(function () {
+  var CFG = window.TH_CONFIG;
+  var t = window.TrelloPowerUp.iframe({ appKey: CFG.appKey, appName: CFG.appName });
+  var root = document.getElementById('root');
+  var tipEl = document.getElementById('tip');
+  var S = { members: {}, records: [], period: 'thisMonth', from: '', to: '', person: 'all', tab: 'week', boardId: null };
+
+  var PERIODS = [
+    ['today', 'Hoje'], ['thisWeek', 'Esta semana'], ['lastWeek', 'Semana passada'],
+    ['thisMonth', 'Este mês'], ['lastMonth', 'Mês passado'], ['last30', 'Últimos 30 dias'],
+    ['thisYear', 'Este ano'], ['all', 'Tudo'], ['custom', 'Personalizado']
+  ];
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ---------- carregamento ---------- */
+  function fail(msg) { root.innerHTML = '<div class="center err">' + esc(msg) + '</div>'; }
+
+  function start() {
+    if (!CFG.appKey || CFG.appKey.indexOf('COLE_') === 0) {
+      return fail('Configure a API Key em config.js (veja o README, passo 3).');
+    }
+    var api = t.getRestApi();
+    api.isAuthorized().then(function (ok) {
+      if (ok) return load(api);
+      root.innerHTML = '<div class="center"><p>Para somar as horas de todos os cartões, o dashboard precisa de permissão de <b>leitura</b> ao seu Trello.</p><button class="primary" id="auth">Autorizar leitura</button><p class="muted">A autorização vale só para você e só para leitura.</p></div>';
+      document.getElementById('auth').onclick = function () {
+        api.authorize({ scope: 'read', expiration: 'never' }).then(function () { load(api); })
+          .catch(function () { fail('Autorização cancelada ou bloqueada. Confira as "Origens permitidas" da API Key (README, passo 3).'); });
+      };
+    }).catch(function (e) { fail('Erro: ' + e.message); });
+  }
+
+  function load(api) {
+    root.innerHTML = '<div class="center">Carregando horas de todos os cartões…</div>';
+    return Promise.all([t.board('id', 'members'), api.getToken()]).then(function (r) {
+      S.boardId = r[0].id;
+      r[0].members.forEach(function (m) {
+        S.members[m.id] = { name: m.fullName || m.username };
+      });
+      var url = 'https://api.trello.com/1/boards/' + S.boardId + '/cards/all?fields=name,shortUrl,closed&pluginData=true&key=' +
+        encodeURIComponent(CFG.appKey) + '&token=' + encodeURIComponent(r[1]);
+      return fetch(url).then(function (res) {
+        if (res.status === 401) throw new Error('Token inválido. Recarregue e autorize novamente.');
+        if (!res.ok) throw new Error('Falha ao buscar cartões (HTTP ' + res.status + ').');
+        return res.json();
+      });
+    }).then(function (cards) {
+      S.records = [];
+      cards.forEach(function (c) {
+        (c.pluginData || []).forEach(function (pd) {
+          var v;
+          try { v = JSON.parse(pd.value); } catch (e) { return; }
+          if (!v || !v[TH.KEY]) return;
+          TH.flatten(v[TH.KEY]).forEach(function (rec) {
+            rec.card = { id: c.id, name: c.name, url: c.shortUrl, closed: c.closed };
+            S.records.push(rec);
+          });
+        });
+      });
+      S.records.forEach(function (rec) {
+        if (!S.members[rec.member]) S.members[rec.member] = { name: 'Ex-membro (' + rec.member.slice(-4) + ')' };
+      });
+      render();
+    }).catch(function (e) { fail(e.message); });
+  }
+
+  /* ---------- períodos ---------- */
+  function range(p) {
+    var now = new Date(), today = TH.startOfDay(now), from, to = new Date(today.getTime() + 864e5 - 1);
+    if (p === 'today') from = today;
+    else if (p === 'thisWeek') from = TH.weekStart(today);
+    else if (p === 'lastWeek') { from = TH.weekStart(today); from.setDate(from.getDate() - 7); to = new Date(from.getTime() + 7 * 864e5 - 1); }
+    else if (p === 'thisMonth') from = TH.monthStart(today);
+    else if (p === 'lastMonth') { from = new Date(today.getFullYear(), today.getMonth() - 1, 1); to = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, -1); }
+    else if (p === 'last30') { from = new Date(today); from.setDate(from.getDate() - 29); }
+    else if (p === 'thisYear') from = new Date(today.getFullYear(), 0, 1);
+    else if (p === 'custom') {
+      from = S.from ? TH.inputToDate(S.from) : new Date(2000, 0, 1);
+      to = S.to ? new Date(TH.inputToDate(S.to).getTime() + 864e5 - 1) : to;
+    } else { from = new Date(2000, 0, 1); }
+    return [from, to];
+  }
+
+  function inRange(rec, r) { return rec.date >= r[0] && rec.date <= r[1]; }
+  function personOk(rec) { return S.person === 'all' || rec.member === S.person; }
+
+  function sumBy(recs, keyFn) {
+    var m = {};
+    recs.forEach(function (r) { var k = keyFn(r); m[k] = (m[k] || 0) + r.min; });
+    return m;
+  }
+
+  /* ---------- cores: fixas por pessoa (nunca por ranking) ---------- */
+  function colorOf(id) {
+    var ids = Object.keys(S.members).sort();
+    var i = ids.indexOf(id);
+    return i >= 0 && i < 7 ? 'var(--s' + (i + 1) + ')' : 'var(--sother)';
+  }
+  function seriesKey(id) {
+    var ids = Object.keys(S.members).sort();
+    var i = ids.indexOf(id);
+    return i >= 0 && i < 7 ? id : 'other';
+  }
+  function seriesName(k) { return k === 'other' ? 'Outros' : S.members[k].name; }
+  function seriesColor(k) { return k === 'other' ? 'var(--sother)' : colorOf(k); }
+
+  /* ---------- gráfico de colunas empilhadas ---------- */
+  function niceStep(maxH) {
+    var steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+    for (var i = 0; i < steps.length; i++) if (maxH / steps[i] <= 4) return steps[i];
+    return 10000;
+  }
+
+  function stacked(buckets) {
+    var W = 760, H = 230, L = 40, B = 26, Tp = 8, R = 8;
+    var maxH = 0;
+    buckets.forEach(function (b) {
+      var s = 0; Object.keys(b.vals).forEach(function (k) { s += b.vals[k]; });
+      b.total = s; maxH = Math.max(maxH, s / 60);
+    });
+    if (maxH === 0) return '<div class="center muted">Sem horas neste intervalo.</div>';
+    var step = niceStep(maxH), yMax = Math.ceil(maxH / step) * step;
+    var pw = W - L - R, ph = H - B - Tp, band = pw / buckets.length, bw = Math.min(44, band * 0.62);
+    var y = function (h) { return Tp + ph - (h / yMax) * ph; };
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Horas por período">';
+    for (var g = 0; g <= yMax; g += step) {
+      svg += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(g) + '" y2="' + y(g) + '" stroke="' + (g === 0 ? 'var(--axis)' : 'var(--grid)') + '"/>';
+      svg += '<text x="' + (L - 6) + '" y="' + (y(g) + 4) + '" text-anchor="end">' + g + 'h</text>';
+    }
+    var order = Object.keys(S.members).sort().map(seriesKey).filter(function (k, i, a) { return a.indexOf(k) === i; });
+    buckets.forEach(function (b, i) {
+      var x = L + band * i + (band - bw) / 2, acc = 0;
+      var tip = '<b>' + esc(b.label) + '</b>';
+      order.forEach(function (k) { if (b.vals[k]) tip += '<div><span>' + esc(seriesName(k)) + '</span><span>' + TH.fmt(b.vals[k]) + '</span></div>'; });
+      tip += '<div><b>Total</b><b>' + TH.fmt(b.total) + '</b></div>';
+      order.forEach(function (k) {
+        var v = b.vals[k]; if (!v) return;
+        var y0 = y(acc / 60), y1 = y((acc + v) / 60);
+        svg += '<rect x="' + x + '" y="' + y1 + '" width="' + bw + '" height="' + Math.max(1, y0 - y1) + '" fill="' + seriesColor(k) + '" stroke="var(--surface)" stroke-width="2" rx="2" data-tip="' + esc(tip) + '"/>';
+        acc += v;
+      });
+      // área de acerto maior que a marca
+      svg += '<rect x="' + (L + band * i) + '" y="' + Tp + '" width="' + band + '" height="' + ph + '" fill="transparent" data-tip="' + esc(tip) + '"/>';
+      svg += '<text x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(b.short) + '</text>';
+    });
+    svg += '</svg>';
+    var used = {};
+    buckets.forEach(function (b) { Object.keys(b.vals).forEach(function (k) { used[k] = 1; }); });
+    var legend = '<div class="legend">' + order.filter(function (k) { return used[k]; }).map(function (k) {
+      return '<span><i class="dot" style="background:' + seriesColor(k) + '"></i>' + esc(seriesName(k)) + '</span>';
+    }).join('') + '</div>';
+    return svg + legend;
+  }
+
+  /* ---------- buckets (últimas N semanas/meses) ---------- */
+  function makeBuckets(kind, n) {
+    var today = TH.startOfDay(new Date()), list = [];
+    for (var i = n - 1; i >= 0; i--) {
+      var from, to, label, short;
+      if (kind === 'week') {
+        from = TH.weekStart(today); from.setDate(from.getDate() - 7 * i);
+        to = new Date(from.getTime() + 7 * 864e5 - 1);
+        short = from.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        label = 'Semana de ' + from.toLocaleDateString('pt-BR');
+      } else {
+        from = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        to = new Date(today.getFullYear(), today.getMonth() - i + 1, 1, 0, 0, 0, -1);
+        short = from.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '') + '/' + String(from.getFullYear()).slice(2);
+        label = from.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+      }
+      list.push({ from: from, to: to, label: label, short: short, vals: {}, byPerson: {} });
+    }
+    S.records.filter(personOk).forEach(function (r) {
+      for (var j = 0; j < list.length; j++) {
+        if (r.date >= list[j].from && r.date <= list[j].to) {
+          var k = seriesKey(r.member);
+          list[j].vals[k] = (list[j].vals[k] || 0) + r.min;
+          list[j].byPerson[r.member] = (list[j].byPerson[r.member] || 0) + r.min;
+          break;
+        }
+      }
+    });
+    return list;
+  }
+
+  function heatTable(buckets) {
+    var people = {};
+    buckets.forEach(function (b) { Object.keys(b.byPerson).forEach(function (m) { people[m] = 1; }); });
+    var ids = Object.keys(people).sort(function (a, b) { return S.members[a].name.localeCompare(S.members[b].name); });
+    if (!ids.length) return '';
+    var max = 0;
+    buckets.forEach(function (b) { Object.keys(b.byPerson).forEach(function (m) { max = Math.max(max, b.byPerson[m]); }); });
+    var cols = ['#cde2fb', '#9ec5f4', '#6da7ec', '#2a78d6', '#184f95'];
+    var html = '<div class="scroll heat"><table><thead><tr><th>Pessoa</th>' + buckets.map(function (b) { return '<th style="text-align:center">' + esc(b.short) + '</th>'; }).join('') + '<th>Total</th></tr></thead><tbody>';
+    ids.forEach(function (id) {
+      var tot = 0;
+      html += '<tr><td><span class="who"><i class="dot" style="background:' + colorOf(id) + '"></i>' + esc(S.members[id].name) + '</span></td>';
+      buckets.forEach(function (b) {
+        var v = b.byPerson[id] || 0; tot += v;
+        if (!v) { html += '<td class="c muted">·</td>'; return; }
+        var bin = Math.min(4, Math.floor((v / max) * 5 - 1e-9));
+        var fg = bin >= 3 ? '#fff' : '#0b0b0b';
+        html += '<td class="c" style="background:' + cols[bin] + ';color:' + fg + '" data-tip="' + esc('<b>' + S.members[id].name + '</b><div><span>' + b.label + '</span><span>' + TH.fmt(v) + '</span></div>') + '">' + TH.fmt(v) + '</td>';
+      });
+      html += '<td><b>' + TH.fmt(tot) + '</b></td></tr>';
+    });
+    return html + '</tbody></table></div>';
+  }
+
+  /* ---------- render ---------- */
+  function render() {
+    var r = range(S.period);
+    var recs = S.records.filter(personOk);
+    var inP = recs.filter(function (x) { return inRange(x, r); });
+    var totalP = inP.reduce(function (a, x) { return a + x.min; }, 0);
+    var people = {}, cards = {};
+    inP.forEach(function (x) { people[x.member] = 1; cards[x.card.id] = 1; });
+    var nPeople = Object.keys(people).length;
+
+    var now = new Date(), today = TH.startOfDay(now), ws = TH.weekStart(today), ms = TH.monthStart(today);
+    var perPeriod = sumBy(inP, function (x) { return x.member; });
+    var maxP = Math.max.apply(null, [1].concat(Object.keys(perPeriod).map(function (k) { return perPeriod[k]; })));
+
+    var ids = Object.keys(S.members).filter(function (id) {
+      return recs.some(function (x) { return x.member === id; });
+    }).sort(function (a, b) { return (perPeriod[b] || 0) - (perPeriod[a] || 0); });
+
+    var sumIf = function (id, fn) { return recs.filter(function (x) { return x.member === id && fn(x); }).reduce(function (a, x) { return a + x.min; }, 0); };
+
+    var html = '<h1>Dashboard de horas</h1>';
+    html += '<div class="filters">' +
+      '<select id="period">' + PERIODS.map(function (p) { return '<option value="' + p[0] + '"' + (p[0] === S.period ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') + '</select>' +
+      (S.period === 'custom' ? '<input type="date" id="from" value="' + S.from + '"> <span class="muted">até</span> <input type="date" id="to" value="' + S.to + '">' : '') +
+      '<select id="person"><option value="all">Todas as pessoas</option>' + Object.keys(S.members).sort(function (a, b) { return S.members[a].name.localeCompare(S.members[b].name); }).map(function (id) {
+        return '<option value="' + id + '"' + (id === S.person ? ' selected' : '') + '>' + esc(S.members[id].name) + '</option>'; }).join('') + '</select>' +
+      '<span class="spacer"></span><button id="refresh">Atualizar</button><button id="csv">Exportar CSV</button></div>';
+
+    html += '<div class="kpis">' +
+      kpi(TH.fmt(totalP), 'Total no período (' + TH.fmtDec(totalP) + ')') +
+      kpi(nPeople, 'Pessoas com horas') +
+      kpi(Object.keys(cards).length, 'Cartões trabalhados') +
+      kpi(nPeople ? TH.fmt(totalP / nPeople) : '0min', 'Média por pessoa') + '</div>';
+
+    // Resumo por pessoa
+    html += '<div class="card"><h2>Resumo por pessoa</h2>';
+    if (!ids.length) html += '<div class="center muted">Nenhuma hora registrada ainda. Abra um cartão e clique em "Horas".</div>';
+    else {
+      html += '<div class="scroll"><table><thead><tr><th>Pessoa</th><th>Hoje</th><th>Esta semana</th><th>Este mês</th><th>Total geral</th><th class="barcell">No período selecionado</th></tr></thead><tbody>';
+      var sums = [0, 0, 0, 0, 0];
+      ids.forEach(function (id) {
+        var d = sumIf(id, function (x) { return !x.monthly && x.date.getTime() === today.getTime(); });
+        var w = sumIf(id, function (x) { return x.date >= ws; });
+        var m = sumIf(id, function (x) { return x.date >= ms; });
+        var all = sumIf(id, function () { return true; });
+        var p = perPeriod[id] || 0;
+        [d, w, m, all, p].forEach(function (v, i) { sums[i] += v; });
+        html += '<tr><td><span class="who"><i class="dot" style="background:' + colorOf(id) + '"></i>' + esc(S.members[id].name) + '</span></td><td>' + TH.fmt(d) + '</td><td>' + TH.fmt(w) + '</td><td>' + TH.fmt(m) + '</td><td><b>' + TH.fmt(all) + '</b></td>' +
+          '<td class="barcell"><div class="barrow"><div class="bar" style="width:' + Math.round((p / maxP) * 100) + '%"></div><span>' + TH.fmt(p) + '</span></div></td></tr>';
+      });
+      html += '<tr><td><b>Total</b></td>' + sums.slice(0, 4).map(function (v) { return '<td><b>' + TH.fmt(v) + '</b></td>'; }).join('') + '<td class="barcell"><div class="barrow"><b>' + TH.fmt(sums[4]) + '</b></div></td></tr>';
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    // Abas
+    html += '<div class="card"><div class="tabs">' + [['week', 'Por semana'], ['month', 'Por mês'], ['card', 'Por cartão'], ['log', 'Lançamentos']].map(function (x) {
+      return '<button data-tab="' + x[0] + '" class="' + (S.tab === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('') + '</div>';
+    if (S.tab === 'week' || S.tab === 'month') {
+      var bs = makeBuckets(S.tab, 12);
+      html += '<h2>' + (S.tab === 'week' ? 'Últimas 12 semanas (segunda a domingo)' : 'Últimos 12 meses') + '</h2>' + stacked(bs) + '<div style="height:12px"></div>' + heatTable(bs);
+      if (recs.some(function (x) { return x.monthly; })) html += '<p class="muted">Lançamentos com mais de ~90 dias são compactados em resumo mensal (contam no mês, sem o dia exato).</p>';
+    } else if (S.tab === 'card') {
+      var byCard = {};
+      inP.forEach(function (x) {
+        var c = byCard[x.card.id] = byCard[x.card.id] || { card: x.card, total: 0, per: {} };
+        c.total += x.min; c.per[x.member] = (c.per[x.member] || 0) + x.min;
+      });
+      var list = Object.keys(byCard).map(function (k) { return byCard[k]; }).sort(function (a, b) { return b.total - a.total; });
+      html += '<h2>Horas por cartão no período</h2>';
+      if (!list.length) html += '<div class="center muted">Sem horas no período.</div>';
+      else html += '<div class="scroll"><table><thead><tr><th>Cartão</th><th>Pessoas</th><th>Total</th></tr></thead><tbody>' + list.map(function (c) {
+        return '<tr><td><a href="' + esc(c.card.url) + '" target="_blank" rel="noopener">' + esc(c.card.name) + '</a>' + (c.card.closed ? ' <span class="muted">(arquivado)</span>' : '') + '</td><td><div class="chips">' +
+          Object.keys(c.per).map(function (m) { return '<span class="chip">' + esc(S.members[m].name) + ' ' + TH.fmt(c.per[m]) + '</span>'; }).join('') + '</div></td><td><b>' + TH.fmt(c.total) + '</b></td></tr>'; }).join('') + '</tbody></table></div>';
+    } else {
+      var rows = inP.slice().sort(function (a, b) { return b.date - a.date; }).slice(0, 300);
+      html += '<h2>Lançamentos no período' + (inP.length > 300 ? ' (300 mais recentes)' : '') + '</h2>';
+      if (!rows.length) html += '<div class="center muted">Sem lançamentos no período.</div>';
+      else html += '<div class="scroll"><table><thead><tr><th>Data</th><th>Pessoa</th><th>Cartão</th><th>Tempo</th></tr></thead><tbody>' + rows.map(function (x) {
+        return '<tr><td>' + (x.monthly ? x.date.toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }) + ' <span class="muted">(resumo)</span>' : x.date.toLocaleDateString('pt-BR')) + '</td><td>' + esc(S.members[x.member].name) + '</td><td style="text-align:left"><a href="' + esc(x.card.url) + '" target="_blank" rel="noopener">' + esc(x.card.name) + '</a></td><td>' + TH.fmt(x.min) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    root.innerHTML = html;
+    bind();
+  }
+
+  function kpi(v, l) { return '<div class="kpi"><div class="v">' + esc(v) + '</div><div class="l">' + esc(l) + '</div></div>'; }
+
+  function bind() {
+    var $ = function (id) { return document.getElementById(id); };
+    $('period').onchange = function () {
+      S.period = this.value;
+      if (S.period === 'custom' && !S.from) { S.from = TH.dateToInput(TH.monthStart(new Date())); S.to = TH.dateToInput(new Date()); }
+      render();
+    };
+    $('person').onchange = function () { S.person = this.value; render(); };
+    if ($('from')) { $('from').onchange = function () { S.from = this.value; render(); }; $('to').onchange = function () { S.to = this.value; render(); }; }
+    $('refresh').onclick = start;
+    $('csv').onclick = exportCsv;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+      b.onclick = function () { S.tab = b.getAttribute('data-tab'); render(); };
+    });
+  }
+
+  function exportCsv() {
+    var r = range(S.period);
+    var rows = [['data', 'pessoa', 'cartao', 'minutos', 'horas', 'tipo']];
+    S.records.filter(personOk).filter(function (x) { return inRange(x, r); }).sort(function (a, b) { return a.date - b.date; }).forEach(function (x) {
+      rows.push([TH.dateToInput(x.date), S.members[x.member].name, x.card.name, x.min, (x.min / 60).toFixed(2), x.monthly ? 'resumo mensal' : 'dia']);
+    });
+    var csv = '﻿' + rows.map(function (row) { return row.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(';'); }).join('\n');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'horas-' + TH.dateToInput(new Date()) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  /* tooltip por delegação */
+  document.addEventListener('mousemove', function (e) {
+    var el = e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (!el) { tipEl.style.display = 'none'; return; }
+    tipEl.innerHTML = el.getAttribute('data-tip');
+    tipEl.style.display = 'block';
+    var x = e.clientX + 14, y = e.clientY + 14;
+    if (x + tipEl.offsetWidth > window.innerWidth - 8) x = e.clientX - tipEl.offsetWidth - 14;
+    if (y + tipEl.offsetHeight > window.innerHeight - 8) y = e.clientY - tipEl.offsetHeight - 14;
+    tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+  });
+
+  t.render(function () {}); // mantém o iframe ativo
+  start();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Registrar horas</title>
+  <link rel="stylesheet" href="https://p.trellocdn.com/power-up.min.css">
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
+  <script src="./config.js"></script>
+  <script src="./util.js"></script>
+  <style>
+    body { margin: 0; }
+    #app { padding: 4px 2px 8px; }
+    h4 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b778c; }
+    .row { display: flex; gap: 6px; align-items: center; }
+    .row > * { flex: 1; min-width: 0; }
+    .timer { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; background: rgba(9,30,66,.06); }
+    .timer .clock { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; flex: 1; }
+    .list { margin: 0; padding: 0; list-style: none; max-height: 130px; overflow: auto; }
+    .list li { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid rgba(9,30,66,.08); font-size: 13px; }
+    .list button { all: unset; cursor: pointer; color: #c9372c; padding: 0 6px; font-weight: 700; }
+    .people { font-size: 13px; }
+    .people div { display: flex; justify-content: space-between; padding: 2px 0; }
+    .msg { font-size: 12px; color: #c9372c; min-height: 16px; margin-top: 4px; }
+    .muted { color: #6b778c; font-size: 12px; }
+    .total { font-weight: 700; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <h4>Timer</h4>
+  <div class="timer">
+    <span class="clock" id="clock">00:00:00</span>
+    <button class="mod-primary" id="timerBtn">Iniciar</button>
+  </div>
+
+  <h4>Lançar manualmente</h4>
+  <div class="row">
+    <input type="date" id="date">
+    <input type="text" id="dur" placeholder="ex.: 1h30, 45min, 1,5">
+  </div>
+  <button class="mod-primary" id="add" style="width:100%;margin-top:6px">Registrar</button>
+  <div class="msg" id="msg"></div>
+
+  <h4>Minhas horas neste cartão</h4>
+  <ul class="list" id="mine"></ul>
+
+  <h4>Total do cartão</h4>
+  <div class="people" id="people"></div>
+</div>
+
+<script>
+  var t = window.TrelloPowerUp.iframe();
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { me: null, names: {}, data: null, timer: null };
+  var tick = null;
+
+  function setMsg(text) { $('msg').textContent = text || ''; }
+
+  function load() {
+    return Promise.all([
+      t.member('id', 'fullName'),
+      t.board('members'),
+      t.get('card', 'shared', TH.KEY),
+      t.get('card', 'private', 'timer')
+    ]).then(function (r) {
+      state.me = r[0];
+      r[1].members.forEach(function (m) { state.names[m.id] = m.fullName || m.username; });
+      state.data = r[2] || { u: {} };
+      state.timer = r[3] || null;
+      render();
+    });
+  }
+
+  function save(data) {
+    return t.set('card', 'shared', TH.KEY, data).then(function () { state.data = data; render(); });
+  }
+
+  function fmtClock(ms) {
+    var s = Math.floor(ms / 1000);
+    return TH.pad(Math.floor(s / 3600)) + ':' + TH.pad(Math.floor((s % 3600) / 60)) + ':' + TH.pad(s % 60);
+  }
+
+  function render() {
+    $('timerBtn').textContent = state.timer ? 'Parar e registrar' : 'Iniciar';
+    clearInterval(tick);
+    if (state.timer) {
+      var upd = function () { $('clock').textContent = fmtClock(Date.now() - state.timer); };
+      upd(); tick = setInterval(upd, 1000);
+    } else {
+      $('clock').textContent = '00:00:00';
+    }
+
+    // Minhas entradas
+    var mine = state.data.u[state.me.id] || {};
+    var keys = Object.keys(mine).sort().reverse();
+    var ul = $('mine');
+    ul.innerHTML = '';
+    if (!keys.length) ul.innerHTML = '<li class="muted">Nenhum lançamento seu ainda.</li>';
+    keys.forEach(function (k) {
+      var d = TH.keyToDate(k);
+      var label = k[0] === 'm'
+        ? d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) + ' (resumo)'
+        : d.toLocaleDateString('pt-BR');
+      var li = document.createElement('li');
+      var span = document.createElement('span');
+      span.textContent = label + ' - ' + TH.fmt(mine[k]);
+      var del = document.createElement('button');
+      del.textContent = '×';
+      del.title = 'Remover';
+      del.onclick = function () {
+        save(TH.removeEntry(state.data, state.me.id, k)).catch(function (e) { setMsg(e.message); });
+      };
+      li.appendChild(span); li.appendChild(del); ul.appendChild(li);
+    });
+
+    // Total por pessoa
+    var box = $('people');
+    box.innerHTML = '';
+    var rows = Object.keys(state.data.u).map(function (mid) {
+      var sum = 0;
+      Object.keys(state.data.u[mid]).forEach(function (k) { sum += state.data.u[mid][k]; });
+      return { name: state.names[mid] || 'Ex-membro', sum: sum };
+    }).sort(function (a, b) { return b.sum - a.sum; });
+    rows.forEach(function (r) {
+      var d = document.createElement('div');
+      d.innerHTML = '<span></span><span></span>';
+      d.children[0].textContent = r.name;
+      d.children[1].textContent = TH.fmt(r.sum);
+      box.appendChild(d);
+    });
+    var tot = document.createElement('div');
+    tot.className = 'total';
+    tot.innerHTML = '<span>Total</span><span></span>';
+    tot.children[1].textContent = TH.fmt(TH.totalOf(state.data));
+    box.appendChild(tot);
+
+    t.sizeTo('#app').catch(function () {});
+  }
+
+  function addMinutes(minutes, key) {
+    var data = TH.addEntry(state.data, state.me.id, key, minutes);
+    return save(data);
+  }
+
+  $('date').value = TH.dateToInput(new Date());
+
+  $('add').onclick = function () {
+    setMsg('');
+    var min = TH.parseDuration($('dur').value);
+    if (!min || min <= 0) { setMsg('Duração inválida. Use 1h30, 45min, 1,5 (horas).'); return; }
+    if (min > 24 * 60) { setMsg('Máximo de 24h por lançamento.'); return; }
+    if (!$('date').value) { setMsg('Escolha uma data.'); return; }
+    var key = TH.dayKey(TH.inputToDate($('date').value));
+    addMinutes(min, key).then(function () { $('dur').value = ''; }).catch(function (e) { setMsg(e.message); });
+  };
+  $('dur').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('add').click(); });
+
+  $('timerBtn').onclick = function () {
+    setMsg('');
+    if (!state.timer) {
+      t.set('card', 'private', 'timer', Date.now()).then(function () { state.timer = Date.now(); render(); });
+      return;
+    }
+    var start = state.timer;
+    var minutes = Math.max(1, Math.round((Date.now() - start) / 60000));
+    addMinutes(minutes, TH.dayKey(new Date(start)))
+      .then(function () { return t.remove('card', 'private', 'timer'); })
+      .then(function () { state.timer = null; render(); })
+      .catch(function (e) { setMsg(e.message); });
+  };
+
+  load().catch(function (e) { setMsg('Erro ao carregar: ' + e.message); });
+</script>
+</body>
+</html>
